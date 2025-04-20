@@ -43,20 +43,35 @@ void Task_Create(TaskFunction_t taskFunction, int period, int deadline, int time
     }
 }
 ```
+//////这里还是会有低优先级饥饿问题
+////流程是：接受任务，计算优先级并按照优先级排序生成列表
+            根据优先级调度，算法里会分配时间片，用完了直接在列表里找下一个，特别紧迫会延长时间
+            这样似乎低优先级的还是几乎轮不到
+            没有利用RR法的动态调度的灵活性
+            ///可以高优先级用EDF，低优先级用RR
+            ///或者引入优先级衰减机制，随着时间的推移，低优先级任务的优先级逐渐提高，从而减少饥饿的可能性。
+            ///下次弄
+
+
+
 
 ### 3. 任务调度逻辑
-在调度器中，结合EDF和RR策略来选择下一个任务。
+在调度器中，结合EDF和RR策略来选择下一个任务，即根据优先级进行时间片轮转。
+处理时间片的逻辑：任务一旦用完就切出。
+
+
 
 ```c
 void Scheduler_Start(void) {
     while (1) {
         Task_t* nextTask = NULL;
-        int nextDeadline = INT_MAX;
+        //int nextDeadline = INT_MAX;
+        int nextPriority = -1;
 
-        // 找到最早截止时间的任务
+        // 找到最高优先级的任务，将nextPriority的值改为打算执行的任务的优先级，//感觉可能有问题
         for (int i = 0; i < TaskCount; i++) {
-            if (TaskList[i].state == TASK_READY && TaskList[i].deadline < nextDeadline) {
-                nextDeadline = TaskList[i].deadline;
+            if (TaskList[i].state == TASK_READY && TaskList[i].priority > nextPriority) {
+                nextPriority = TaskList[i].priority;
                 nextTask = &TaskList[i];
             }
         }
@@ -66,10 +81,15 @@ void Scheduler_Start(void) {
                 nextTask->run();
                 nextTask->remainingTime--;
 
-                // 如果时间片用完，则进行任务切换
+               // 如果时间片用完，但任务的截止时间仍然紧迫，延长时间片
                 if (nextTask->remainingTimeSlice <= 0) {
-                    Scheduler_Yield(nextTask);
-                    nextTask->remainingTimeSlice = nextTask->timeSlice;
+                    if (nextTask->deadline > getCurrentTime() + nextTask->remainingTime) {
+                        // 延长时间片，继续执行当前任务
+                        nextTask->remainingTimeSlice = nextTask->timeSlice;
+                    } else {
+                        // 切换到下一个任务
+                        Scheduler_Yield(nextTask);
+                    }
                 }
             } else {
                 // 任务完成一个周期，更新其状态和剩余时间
@@ -89,8 +109,8 @@ void Scheduler_Start(void) {
 ```
 
 ### 4. 任务切换
-在任务切换时，可以选择下一个最高优先级的任务，并处理时间片的逻辑。
-
+创建函数时按照优先级排列，此处会直接找下一个
+然后是任务切换的其余工作，以后补充
 ```c
 void Scheduler_Yield(Task_t* currentTask) {
     int nextTaskIndex = FindNextTask(currentTask);
@@ -112,7 +132,7 @@ int FindNextTask(Task_t* currentTask) {
 ```
 
 ### 5. 优先级计算
-根据任务周期与截止时间计算优先级，优先级与周期和截止时间成反比。
+根据 任务周期 与 截止时间 计算优先级，优先级与周期和截止时间成反比。
 
 ```c
 int CalculatePriority(Task_t* task) {
